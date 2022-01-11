@@ -20,6 +20,7 @@ func main() {
 
 	stdinReader := bufio.NewReader(os.Stdin)
 	serverReader := bufio.NewReader(conn)
+	// select login or register
 	for {
 		fmt.Println("Select options: \n(1) Login\n(2) Register")
 		opt, err := stdinReader.ReadString('\n')
@@ -88,6 +89,7 @@ func main() {
 		break
 	}
 
+	// home page, select which option to do
 	for {
 		fmt.Println("Home\n (1) List all friends\n (2) Add friend\n (3) Delete a friend\n (4) Choose a chat room\n (5) Exit")
 		opt, err := stdinReader.ReadString('\n')
@@ -100,7 +102,12 @@ func main() {
 			errorHandler(err)
 			fmt.Print(res)
 		case "2":
-			fmt.Fprintf(conn, "add\n")
+			fmt.Print("enter friend name you want to add: ")
+			friendAdd, err := stdinReader.ReadString('\n')
+			errorHandler(err)
+			cmd := "add " + friendAdd
+			fmt.Fprintf(conn, cmd)
+
 			res, err := serverReader.ReadString('\n')
 			errorHandler(err)
 			res = strings.Replace(res, "\n", "", -1)
@@ -112,25 +119,54 @@ func main() {
 				fmt.Println("user not exist")
 			}
 		case "3":
+			fmt.Print("enter friend name you want to delete: ")
+			friendDel, err := stdinReader.ReadString('\n')
+			errorHandler(err)
+			cmd := "delete " + friendDel
+			fmt.Fprintf(conn, cmd)
 			fmt.Fprintf(conn, "delete\n")
+
 			res, err := serverReader.ReadString('\n')
 			errorHandler(err)
 			res = strings.Replace(res, "\n", "", -1)
 			if res == "ok" {
 				fmt.Println("friend deleted")
 			} else if res == "failed" {
-				fmt.Println("user not exist / user is not your friend")
+				fmt.Println("invald username")
 			}
 		case "4":
 			fmt.Fprintf(conn, "choose\n")
+			chatList, err := serverReader.ReadString('\n')
+			errorHandler(err)
+			fmt.Print(chatList)
+
+			target, err := stdinReader.ReadString('\n')
+			errorHandler(err)
+			cmd := "choose " + target
+			fmt.Fprintf(conn, cmd)
+			res, err := serverReader.ReadString('\n')
+			errorHandler(err)
+			res = strings.Replace(res, "\n", "", -1)
+			if res == "ok" {
+				break
+			} else {
+				fmt.Println("invalid username")
+			}
 		case "5":
-			break
+			fmt.Println("Bye~")
+			os.Exit(0)
 		default:
 			fmt.Println("option not found")
 			continue
 		}
+		// just for not showing error message in vs code, should be commented when uploading
+		// break
 	}
 
+	// chatroom init
+	for {
+
+	}
 	fmt.Fprintf(conn, "GET / HTTP/1.0\r\n\r\n")
 	status, err := bufio.NewReader(conn).ReadString('\n')
 	fmt.Println(status)
@@ -141,4 +177,8 @@ func errorHandler(err error) {
 		fmt.Print(err)
 		os.Exit(1)
 	}
+}
+
+func home() {
+
 }
