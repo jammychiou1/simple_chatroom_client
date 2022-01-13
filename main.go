@@ -18,7 +18,7 @@ func main() {
 		fmt.Println(err)
 		os.Exit(1)
 	}
-
+	var user string
 	stdinReader := bufio.NewReader(os.Stdin)
 	serverReader := bufio.NewReader(conn)
 	// select login or register
@@ -52,6 +52,7 @@ func main() {
 			if res == "no" {
 				fmt.Println("username not found / password incorrect")
 			} else if res == "yes" {
+				user = username
 				break
 			}
 		} else if opt == "2" {
@@ -76,6 +77,7 @@ func main() {
 			if res == "no" {
 				fmt.Println("username is in use")
 			} else if res == "yes" {
+				user = username
 				break
 			}
 		} else {
@@ -86,6 +88,7 @@ func main() {
 	}
 
 	// home page, select which option to do
+	var friend string
 	for {
 		fmt.Println("Home\n (1) List all friends\n (2) Add friend\n (3) Delete a friend\n (4) Choose a chat room\n (5) Exit")
 		opt, err := stdinReader.ReadString('\n')
@@ -97,13 +100,12 @@ func main() {
 			res, err := serverReader.ReadString('\n')
 			errorHandler(err)
 			res = strings.Replace(res, "\n", "", -1)
-			if res == "" {
-				fmt.Println("friend list is empty")
-				continue
+			friendList := strings.Split(res, " ")
+			for i := 0; i < len(friendList); i++ {
+				friendDec, err := b64.StdEncoding.DecodeString(friendList[i])
+				errorHandler(err)
+				fmt.Print(string(friendDec) + " ")
 			}
-			resDec, err := b64.StdEncoding.DecodeString(res)
-			errorHandler(err)
-			fmt.Print(string(resDec))
 			fmt.Println()
 		case "2":
 			fmt.Print("enter friend name you want to add: ")
@@ -146,13 +148,31 @@ func main() {
 			}
 		case "4":
 			fmt.Fprintf(conn, "listChatroom\n")
-			chatList, err := serverReader.ReadString('\n')
+			res, err := serverReader.ReadString('\n')
 			errorHandler(err)
-			chatList = strings.Replace(chatList, "\n", "", -1)
-			if chatList != "" {
-				chatListDec, err := b64.StdEncoding.DecodeString(chatList)
-				errorHandler(err)
-				fmt.Print(string(chatListDec))
+			res = strings.Replace(res, "\n", "", -1)
+
+			chatroomNum, err := strconv.Atoi(res)
+			if chatroomNum == 0 {
+				fmt.Println("chatroom list is empty")
+				continue
+			} else {
+				for i := 0; i < chatroomNum; i++ {
+					res, err := serverReader.ReadString('\n')
+					errorHandler(err)
+					res = strings.Replace(res, "\n", "", -1)
+					chatroomInfo := strings.Split(res, " ")
+					mem1, err := b64.StdEncoding.DecodeString(chatroomInfo[1])
+					errorHandler(err)
+					mem2, err := b64.StdEncoding.DecodeString(chatroomInfo[2])
+					errorHandler(err)
+					fmt.Printf("(" + chatroomInfo[0] + ") ")
+					if user == string(mem1) {
+						fmt.Println(string(mem2))
+					} else {
+						fmt.Println(string(mem1))
+					}
+				}
 			}
 
 			fmt.Println("Join a chatroom by ID or type c to create a chatroom")
@@ -177,13 +197,25 @@ func main() {
 					fmt.Println("invalid username")
 				}
 			} else {
-				// join chatroom according to ID
+				// join chatroom by ID
 				cmd := "joinChatroom " + opt + "\n"
 				fmt.Fprintf(conn, cmd)
+				// receive id member1 member2
 				res, err := serverReader.ReadString('\n')
 				errorHandler(err)
 				res = strings.Replace(res, "\n", "", -1)
-				if res == "ok" {
+				chatroomInfo := strings.Split(res, " ")
+
+				if chatroomInfo[0] == "ok" {
+					mem1, err := b64.StdEncoding.DecodeString(chatroomInfo[1])
+					errorHandler(err)
+					mem2, err := b64.StdEncoding.DecodeString(chatroomInfo[2])
+					errorHandler(err)
+					if user == string(mem1) {
+						friend = string(mem2)
+					} else {
+						friend = string(mem1)
+					}
 					break
 				} else {
 					fmt.Println("invalid ID")
