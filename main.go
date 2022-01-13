@@ -4,11 +4,16 @@ import (
 	"bufio"
 	b64 "encoding/base64"
 	"fmt"
+	"io"
+	"log"
 	"net"
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 )
+
+const BUFFER_SIZE = 1024
 
 func main() {
 	fmt.Println(os.Args[1])
@@ -254,7 +259,10 @@ outerLoop:
 		fmt.Printf("%s\n", data)
 	}
 
+	var wg sync.WaitGroup
+	// inside chatroom
 	fmt.Print("Chatroom option: \n (0) help\n (1) send message\n (2) send image\n (3) send file\n (4) refresh message\n (5) exit chatroom\n\nopt: ")
+chatRoomLoop:
 	for {
 		opt, err := stdinReader.ReadString('\n')
 		errorHandler(err)
@@ -263,20 +271,54 @@ outerLoop:
 		case "0":
 			fmt.Println("Chatroom option: \n (0) help\n (1) send message\n (2) send image\n (3) send file\n (4) refresh message\n (5) exit chatroom")
 		case "1":
-			fmt.Print("msg: ")
+			fmt.Printf("%s: ", user)
 			msg, err := stdinReader.ReadString('\n')
 			errorHandler(err)
 			msg = strings.Replace(msg, "\n", "", -1)
 			msgEnc := b64.StdEncoding.EncodeToString([]byte(msg))
-			fmt.Fprintf(conn, "msg "+msgEnc+"\n")
+			fmt.Fprintf(conn, "sendMessage %s\n", msgEnc)
 
 		case "2":
 			fmt.Print("img name:")
 		case "3":
 			fmt.Print("file name:")
+			filename, err := stdinReader.ReadString('\n')
+			errorHandler(err)
+			filename = strings.Replace(filename, "\n", "", -1)
+			file, err := os.Open(filename)
+			if err != nil {
+				log.Fatal(err)
+				continue chatRoomLoop
+			}
+			filenameEnc := b64.StdEncoding.EncodeToString([]byte(filename))
+			fmt.Fprintf(conn, "sendFile %s\n", filenameEnc)
+			token, err := serverReader.ReadString('\n')
+			errorHandler(err)
+			token = strings.Replace(token, "\n", "", -1)
+
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				fileConn, err := net.Dial("tcp", fmt.Sprintf("%s:%s", os.Args[1], os.Args[2]))
+				errorHandler(err)
+				fmt.Fprintf(fileConn, "token %s\n", token)
+				fileReader := bufio.NewReader(fileConn)
+				res, err := fileReader.ReadString('\n')
+				errorHandler(err)
+				res = strings.Replace(res, "\n", "", -1)
+				if res == "ok" {
+					_, err = io.Copy(fileConn, file)
+					errorHandler(err)
+					fileConn.Close()
+				} else {
+					fmt.Println("token not accepted")
+					fileConn.Close()
+					return
+				}
+			}()
 		case "4":
 			left = right
-			fmt.Fprintf(conn, "refresh "+strconv.Itoa(left)+"\n")
+			fmt.Fprintf(conn, "logs %d -1\n", left)
 			res, err := serverReader.ReadString('\n')
 			errorHandler(err)
 			res = strings.Replace(res, "\n", "", -1)
@@ -295,7 +337,7 @@ outerLoop:
 			}
 		case "5":
 			fmt.Print("exit chatroom")
-			break
+			break chatRoomLoop
 		default:
 			fmt.Println("invalid option")
 		}
@@ -303,6 +345,7 @@ outerLoop:
 	fmt.Fprintf(conn, "GET / HTTP/1.0\r\n\r\n")
 	status, err := bufio.NewReader(conn).ReadString('\n')
 	fmt.Println(status)
+	wg.Wait()
 }
 
 func errorHandler(err error) {
