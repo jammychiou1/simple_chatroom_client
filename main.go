@@ -89,6 +89,7 @@ func main() {
 
 	// home page, select which option to do
 	var friend string
+	_ = friend
 	for {
 		fmt.Println("Home\n (1) List all friends\n (2) Add friend\n (3) Delete a friend\n (4) Choose a chat room\n (5) Exit")
 		opt, err := stdinReader.ReadString('\n')
@@ -155,7 +156,6 @@ func main() {
 			chatroomNum, err := strconv.Atoi(res)
 			if chatroomNum == 0 {
 				fmt.Println("chatroom list is empty")
-				continue
 			} else {
 				for i := 0; i < chatroomNum; i++ {
 					res, err := serverReader.ReadString('\n')
@@ -189,8 +189,7 @@ func main() {
 				fmt.Fprintf(conn, cmd)
 				res, err := serverReader.ReadString('\n')
 				res = strings.Replace(res, "\n", "", -1)
-				resDec, err := b64.StdEncoding.DecodeString(res)
-				data := strings.Split(string(resDec), " ")
+				data := strings.Split(res, " ")
 				if data[0] == "ok" {
 					fmt.Println("chatroom created, ID: " + data[1])
 				} else if data[0] == "failed" {
