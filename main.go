@@ -90,6 +90,8 @@ func main() {
 	// home page, select which option to do
 	var friend string
 	_ = friend
+
+outerLoop:
 	for {
 		fmt.Println("Home\n (1) List all friends\n (2) Add friend\n (3) Delete a friend\n (4) Choose a chat room\n (5) Exit")
 		opt, err := stdinReader.ReadString('\n')
@@ -215,7 +217,7 @@ func main() {
 					} else {
 						friend = string(mem1)
 					}
-					break
+					break outerLoop
 				} else {
 					fmt.Println("invalid ID")
 				}
@@ -234,7 +236,7 @@ func main() {
 
 	// chatroom init
 	// format: <left> <right>\n<user>:<msg>\n<user>:<msg>\n...
-	fmt.Fprintf(conn, "logs\n")
+	fmt.Fprintf(conn, "logs 0 -1\n")
 	res, err := serverReader.ReadString('\n')
 	errorHandler(err)
 	res = strings.Replace(res, "\n", "", -1)
