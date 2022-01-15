@@ -5,7 +5,6 @@ import (
 	b64 "encoding/base64"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"os"
 	"strconv"
@@ -242,33 +241,8 @@ outerLoop:
 	// chatroom init
 	// format: <left> <right>\n<user>:<msg>\n<user>:<msg>\n...
 	fileMap := make(map[string]string)
-	fmt.Fprintf(conn, "logs 0 -1\n")
-	res, err := serverReader.ReadString('\n')
-	errorHandler(err)
-	res = strings.Replace(res, "\n", "", -1)
-	border := strings.Split(res, " ")
-	left, err := strconv.Atoi(border[0])
-	errorHandler(err)
-	right, err := strconv.Atoi(border[1])
-	errorHandler(err)
-	for i := left; i < right; i++ {
-		res, err := serverReader.ReadString('\n')
-		errorHandler(err)
-		res = strings.Replace(res, "\n", "", -1)
-		data := strings.Split(res, " ")
-		from, err := b64.StdEncoding.DecodeString(data[0])
-		errorHandler(err)
-		dataType := data[1]
-		msg, err := b64.StdEncoding.DecodeString(data[2])
-		errorHandler(err)
-		if dataType == "text" {
-			fmt.Printf("%s:%s\n", string(from), string(msg))
-		} else if dataType == "file" {
-			fileMap[data[3]] = string(msg)
-			fmt.Printf("%s:[%s]\n", string(from), string(msg))
-		}
-	}
-
+	imageMap := make(map[string]string)
+	tail := printLogs(conn, serverReader, fileMap, imageMap, 0)
 	var wg sync.WaitGroup
 	// inside chatroom
 	fmt.Print("Chatroom option: \n (0) help\n (1) send message\n (2) send image\n (3) send file\n (4) refresh message\n (5) get image\n (6) get file\n (7) exit chatroom\n ")
@@ -278,6 +252,15 @@ outerLoop:
 	createDirectory("./clientDir")
 chatRoomLoop:
 	for {
+	LOOP:
+		for {
+			select {
+			case v := <-ch:
+				fmt.Print(v)
+			default:
+				break LOOP
+			}
+		}
 		fmt.Print("opt: ")
 		opt, err := stdinReader.ReadString('\n')
 		errorHandler(err)
@@ -294,214 +277,20 @@ chatRoomLoop:
 			fmt.Fprintf(conn, "sendMessage %s\n", msgEnc)
 
 		case "2":
-			fmt.Print("img name:")
-			imgName, err := stdinReader.ReadString('\n')
-			errorHandler(err)
-			imgName = strings.Replace(imgName, "\n", "", -1)
-			img, err := os.Open("./clientDir/" + imgName)
-			if err != nil {
-				log.Fatal(err)
-				continue chatRoomLoop
-			}
-			fmt.Fprintf(conn, "sendFile\n")
-			token, err := serverReader.ReadString('\n')
-			errorHandler(err)
-			token = strings.Replace(token, "\n", "", -1)
-
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				imgConn, err := net.Dial("tcp", fmt.Sprintf("%s:%s", os.Args[1], os.Args[2]))
-				errorHandler(err)
-				imgNameEnc := b64.StdEncoding.EncodeToString([]byte(imgName))
-				st, err := img.Stat()
-				errorHandler(err)
-
-				fmt.Fprintf(imgConn, "uploadImage %s %s %d\n", token, imgNameEnc, st.Size())
-				imgServerReader := bufio.NewReader(imgConn)
-				res, err := imgServerReader.ReadString('\n')
-				errorHandler(err)
-				res = strings.Replace(res, "\n", "", -1)
-
-				if res == "ok" {
-					_, err = io.Copy(imgConn, img)
-					errorHandler(err)
-					res, err := imgServerReader.ReadString('\n')
-					errorHandler(err)
-					res = strings.Replace(res, "\n", "", -1)
-					if res == "ok" {
-						ch <- fmt.Sprintf("img %s sent\n", imgName)
-					} else {
-						ch <- fmt.Sprintf("img %s failed to send\n", imgName)
-					}
-					imgConn.Close()
-				} else {
-					ch <- "authentication failed\n"
-					imgConn.Close()
-					return
-				}
-			}()
+			upload("Image", conn, stdinReader, serverReader, ch, wg)
 		case "3":
-			fmt.Print("file name:")
-			filename, err := stdinReader.ReadString('\n')
-			errorHandler(err)
-			filename = strings.Replace(filename, "\n", "", -1)
-			file, err := os.Open("./clientDir/" + filename)
-			if err != nil {
-				fmt.Printf("%s\n", err)
-				continue chatRoomLoop
-			}
-			fmt.Fprintf(conn, "sendFile\n")
-			res, err := serverReader.ReadString('\n')
-			errorHandler(err)
-			res = strings.Replace(res, "\n", "", -1)
-			data := strings.Split(res, " ")
-			if data[0] == "ok" {
-				token := data[1]
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-					fileConn, err := net.Dial("tcp", fmt.Sprintf("%s:%s", os.Args[1], os.Args[2]))
-					errorHandler(err)
-					filenameEnc := b64.StdEncoding.EncodeToString([]byte(filename))
-					fi, err := file.Stat()
-					errorHandler(err)
-
-					fmt.Fprintf(fileConn, "uploadFile %s %s %d\n", token, filenameEnc, fi.Size())
-					// fmt.Printf("file %s %s %d\n", token, filenameEnc, fi.Size())
-					fileServerReader := bufio.NewReader(fileConn)
-					res, err := fileServerReader.ReadString('\n')
-					errorHandler(err)
-					res = strings.Replace(res, "\n", "", -1)
-
-					if res == "ok" {
-						_, err = io.Copy(fileConn, file)
-						errorHandler(err)
-						res, err := fileServerReader.ReadString('\n')
-						errorHandler(err)
-						res = strings.Replace(res, "\n", "", -1)
-						if res == "ok" {
-							ch <- fmt.Sprintf("file %s sent\n", filename)
-						} else {
-							ch <- fmt.Sprintf("file %s failed to send\n", filename)
-						}
-						fileConn.Close()
-					} else {
-						ch <- "authentication failed\n"
-						fileConn.Close()
-						return
-					}
-				}()
-			} else {
-				fmt.Println("coommand failed")
-			}
+			upload("File", conn, stdinReader, serverReader, ch, wg)
 		case "4":
-			left = right
-			fmt.Fprintf(conn, "logs %d -1\n", left)
-			res, err := serverReader.ReadString('\n')
-			errorHandler(err)
-			res = strings.Replace(res, "\n", "", -1)
-			border := strings.Split(res, " ")
-			left, err = strconv.Atoi(border[0])
-			errorHandler(err)
-			right, err = strconv.Atoi(border[1])
-			errorHandler(err)
-			// fmt.Printf("%d, %d", left, right)
-			for i := left; i < right; i++ {
-				res, err := serverReader.ReadString('\n')
-				errorHandler(err)
-				res = strings.Replace(res, "\n", "", -1)
-				data := strings.Split(res, " ")
-				from, err := b64.StdEncoding.DecodeString(data[0])
-				errorHandler(err)
-				dataType := data[1]
-				msg, err := b64.StdEncoding.DecodeString(data[2])
-				errorHandler(err)
-				if dataType == "text" {
-					fmt.Printf("%s:%s\n", string(from), string(msg))
-				} else if dataType == "file" {
-					fileMap[data[3]] = string(msg)
-					fmt.Printf("%s:[%s]\n", string(from), string(msg))
-				}
-			}
+			tail = printLogs(conn, serverReader, fileMap, imageMap, tail)
 		case "5":
-
+			download("Image", conn, stdinReader, serverReader, ch, wg, imageMap)
 		case "6":
-			numMap := make(map[int]string)
-			fmt.Fprintf(conn, "listFiles\n")
-			res, err := serverReader.ReadString('\n')
-			errorHandler(err)
-			res = strings.Replace(res, "\n", "", -1)
-			num, err := strconv.Atoi(res)
-			for i := 0; i < num; i++ {
-				res, err := serverReader.ReadString('\n')
-				errorHandler(err)
-				res = strings.Replace(res, "\n", "", -1)
-				data := strings.Split(res, " ")
-				filename, err := b64.StdEncoding.DecodeString(data[0])
-				token := data[1]
-				fileMap[token] = string(filename)
-				numMap[i] = token
-				fmt.Printf("(%d) %s ", i, string(filename))
-			}
-			fmt.Printf("\nChoose the file number you want to download: ")
-			res, err = stdinReader.ReadString('\n')
-			errorHandler(err)
-			res = strings.Replace(res, "\n", "", -1)
-			which, err := strconv.Atoi(res)
-			errorHandler(err)
-			// open a new thread
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				fileConn, err := net.Dial("tcp", fmt.Sprintf("%s:%s", os.Args[1], os.Args[2]))
-				fileServerReader := bufio.NewReader(fileConn)
-				errorHandler(err)
-				fmt.Fprintf(fileConn, "downloadFile %s\n", numMap[which])
-				res, err = fileServerReader.ReadString('\n')
-				errorHandler(err)
-				res = strings.Replace(res, "\n", "", -1)
-				data := strings.Split(res, " ")
-				if data[0] == "ok" {
-					filename, err := b64.StdEncoding.DecodeString(data[1])
-					errorHandler(err)
-					filesize, err := strconv.Atoi(data[2])
-					errorHandler(err)
-					filepath := "./clientDir/" + string(filename)
-					file, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY, os.ModePerm)
-					errorHandler(err)
-					sz, err := io.Copy(file, fileServerReader)
-					errorHandler(err)
-					if sz != int64(filesize) {
-						ch <- fmt.Sprintf("file copy incomplete\n")
-						return
-					} else {
-						ch <- fmt.Sprintf("file %s received\n", string(filename))
-					}
-					file.Close()
-				}
-				fileConn.Close()
-			}()
-
-			// filename, err := stdinReader.ReadString('\n')
-			// errorHandler(err)
-			// filename = strings.Replace(filename, "\n", "", -1)
-			// file, err := os.OpenFile("./clientDir/" + filename)
-
+			download("File", conn, stdinReader, serverReader, ch, wg, fileMap)
 		case "7":
 			fmt.Print("exit chatroom")
 			break chatRoomLoop
 		default:
 			fmt.Println("invalid option")
-		}
-	LOOP:
-		for {
-			select {
-			case v := <-ch:
-				fmt.Print(v)
-			default:
-				break LOOP
-			}
 		}
 	}
 	fmt.Fprintf(conn, "GET / HTTP/1.0\r\n\r\n")
@@ -527,4 +316,159 @@ func createDirectory(dir string) {
 	} else {
 		errorHandler(err)
 	}
+}
+
+func upload(filetype string, conn net.Conn, stdinReader *bufio.Reader, serverReader *bufio.Reader, ch chan string, wg sync.WaitGroup) {
+	fmt.Printf("%s name:", filetype)
+	filename, err := stdinReader.ReadString('\n')
+	errorHandler(err)
+	filename = strings.Replace(filename, "\n", "", -1)
+	file, err := os.Open("./clientDir/" + filename)
+	if err != nil {
+		fmt.Printf("%s\n", err)
+		return
+	}
+	fmt.Fprintf(conn, "send%s\n", filetype)
+	res, err := serverReader.ReadString('\n')
+	errorHandler(err)
+	res = strings.Replace(res, "\n", "", -1)
+	data := strings.Split(res, " ")
+	if data[0] == "ok" {
+		token := data[1]
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			fileConn, err := net.Dial("tcp", fmt.Sprintf("%s:%s", os.Args[1], os.Args[2]))
+			errorHandler(err)
+			filenameEnc := b64.StdEncoding.EncodeToString([]byte(filename))
+			fi, err := file.Stat()
+			errorHandler(err)
+
+			fmt.Fprintf(fileConn, "upload%s %s %s %d\n", filetype, token, filenameEnc, fi.Size())
+			// fmt.Printf("file %s %s %d\n", token, filenameEnc, fi.Size())
+			fileServerReader := bufio.NewReader(fileConn)
+			res, err := fileServerReader.ReadString('\n')
+			errorHandler(err)
+			res = strings.Replace(res, "\n", "", -1)
+
+			if res == "ok" {
+				_, err = io.Copy(fileConn, file)
+				errorHandler(err)
+				res, err := fileServerReader.ReadString('\n')
+				errorHandler(err)
+				res = strings.Replace(res, "\n", "", -1)
+				if res == "ok" {
+					ch <- fmt.Sprintf("%s %s sent\n", filetype, filename)
+				} else {
+					ch <- fmt.Sprintf("%s %s failed to send\n", filetype, filename)
+				}
+				fileConn.Close()
+			} else {
+				ch <- "authentication failed\n"
+				fileConn.Close()
+				return
+			}
+		}()
+	} else {
+		fmt.Println("coommand failed")
+	}
+}
+
+func download(filetype string, conn net.Conn, stdinReader *bufio.Reader, serverReader *bufio.Reader, ch chan string, wg sync.WaitGroup, fileMap map[string]string) {
+	numMap := make(map[int]string)
+	fmt.Fprintf(conn, "list%ss\n", filetype)
+	res, err := serverReader.ReadString('\n')
+	errorHandler(err)
+	res = strings.Replace(res, "\n", "", -1)
+	num, err := strconv.Atoi(res)
+	if num == 0 {
+		fmt.Println("No files available")
+		return
+	}
+	for i := 0; i < num; i++ {
+		res, err := serverReader.ReadString('\n')
+		errorHandler(err)
+		res = strings.Replace(res, "\n", "", -1)
+		data := strings.Split(res, " ")
+		filename, err := b64.StdEncoding.DecodeString(data[0])
+		token := data[1]
+		fileMap[token] = string(filename)
+		numMap[i] = token
+		fmt.Printf("(%d) %s ", i, string(filename))
+	}
+	fmt.Printf("\nChoose the %s number you want to download: ", filetype)
+	res, err = stdinReader.ReadString('\n')
+	errorHandler(err)
+	res = strings.Replace(res, "\n", "", -1)
+	which, err := strconv.Atoi(res)
+	if which >= num {
+		fmt.Println("Index out of range")
+		return
+	}
+	errorHandler(err)
+	// open a new thread
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		fileConn, err := net.Dial("tcp", fmt.Sprintf("%s:%s", os.Args[1], os.Args[2]))
+		fileServerReader := bufio.NewReader(fileConn)
+		errorHandler(err)
+		fmt.Fprintf(fileConn, "download%s %s\n", filetype, numMap[which])
+		res, err = fileServerReader.ReadString('\n')
+		errorHandler(err)
+		res = strings.Replace(res, "\n", "", -1)
+		data := strings.Split(res, " ")
+		if data[0] == "ok" {
+			filename, err := b64.StdEncoding.DecodeString(data[1])
+			errorHandler(err)
+			filesize, err := strconv.Atoi(data[2])
+			errorHandler(err)
+			filepath := "./clientDir/" + string(filename)
+			file, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY, os.ModePerm)
+			errorHandler(err)
+			sz, err := io.Copy(file, fileServerReader)
+			errorHandler(err)
+			if sz != int64(filesize) {
+				ch <- fmt.Sprintf("%s copy incomplete\n", filetype)
+				return
+			} else {
+				ch <- fmt.Sprintf("%s %s received\n", filetype, string(filename))
+			}
+			file.Close()
+		}
+		fileConn.Close()
+	}()
+}
+
+func printLogs(conn net.Conn, serverReader *bufio.Reader, fileMap map[string]string, imageMap map[string]string, start int) int {
+	fmt.Fprintf(conn, "logs %d -1\n", start)
+	res, err := serverReader.ReadString('\n')
+	errorHandler(err)
+	res = strings.Replace(res, "\n", "", -1)
+	border := strings.Split(res, " ")
+	left, err := strconv.Atoi(border[0])
+	errorHandler(err)
+	right, err := strconv.Atoi(border[1])
+	errorHandler(err)
+	for i := left; i < right; i++ {
+		res, err := serverReader.ReadString('\n')
+		errorHandler(err)
+		res = strings.Replace(res, "\n", "", -1)
+		data := strings.Split(res, " ")
+		from, err := b64.StdEncoding.DecodeString(data[0])
+		errorHandler(err)
+		dataType := data[1]
+		msg, err := b64.StdEncoding.DecodeString(data[2])
+		errorHandler(err)
+		if dataType == "text" {
+			fmt.Printf("%s:%s\n", string(from), string(msg))
+		} else if dataType == "file" {
+			fileMap[data[3]] = string(msg)
+			fmt.Printf("%s:[%s]\n", string(from), string(msg))
+		} else if dataType == "image" {
+			imageMap[data[3]] = string(msg)
+			fmt.Printf("%s:[%s]\n", string(from), string(msg))
+		}
+	}
+	return right
 }
