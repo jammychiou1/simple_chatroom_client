@@ -17,6 +17,16 @@ const BUFFER_SIZE = 1024
 func main() {
 	fmt.Println(os.Args[1])
 	fmt.Println(fmt.Sprintf("%s:%s", os.Args[1], os.Args[2]))
+
+	var wg sync.WaitGroup
+    
+    wg.Add(1)
+
+    go func() {
+        defer wg.Done()
+        runWebserver()
+    }()
+
 	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%s", os.Args[1], os.Args[2]))
 	if err != nil {
 		fmt.Println(err)
@@ -243,7 +253,6 @@ outerLoop:
 	fileMap := make(map[string]string)
 	imageMap := make(map[string]string)
 	tail := printLogs(conn, serverReader, fileMap, imageMap, 0)
-	var wg sync.WaitGroup
 	// inside chatroom
 	fmt.Print("Chatroom option: \n (0) help\n (1) send message\n (2) send image\n (3) send file\n (4) refresh message\n (5) get image\n (6) get file\n (7) exit chatroom\n ")
 	// make a channel, for non-blocking message sending
